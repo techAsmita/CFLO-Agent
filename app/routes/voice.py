@@ -2,18 +2,19 @@ import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from fastapi import APIRouter, Request, Form
+from fastapi import APIRouter, Request
 from fastapi.responses import Response
-from twilio.twiml.voice_response import VoiceResponse, Gather
+from twilio.twiml.voice_response import VoiceResponse, Gather, Record
 from data.database import get_borrower_by_phone, log_ptp, log_call
 from app.services.dialogue import get_agent_response, build_greeting
+from app.services.stt import transcribe_twilio_recording
 from dotenv import load_dotenv
 
 load_dotenv()
 
 router = APIRouter()
-
 conversation_sessions = {}
+
 
 def twiml_response(text: str, action_url: str, timeout: int = 5) -> str:
     response = VoiceResponse()
@@ -23,11 +24,15 @@ def twiml_response(text: str, action_url: str, timeout: int = 5) -> str:
         method="POST",
         timeout=timeout,
         speech_timeout="auto",
-        language="en-IN"
+        language="en-IN",
+        enhanced=True,
     )
     gather.say(text, voice="Polly.Aditi", language="en-IN")
     response.append(gather)
-    response.say("I didn't catch that. Let me transfer you to an agent.", voice="Polly.Aditi")
+    response.say(
+        "I didn't catch that. Let me transfer you to an agent.",
+        voice="Polly.Aditi"
+    )
     return str(response)
 
 
@@ -52,9 +57,9 @@ async def inbound_call(request: Request):
             "history": [],
             "intent": "inbound_unknown"
         }
-        greeting = "Hello, thank you for calling CFLO. I'm your AI assistant. How can I help you with your loan account today?"
+        greeting = "Hello, thank you for calling CFLO. I am your AI assistant. How can I help you with your loan account today?"
 
-    action_url = f"{os.getenv('BASE_URL', 'http://localhost:8000')}/voice/respond"
+    action_url = f"{os.getenv('BASE_URL')}/voice/respond"
     return Response(
         content=twiml_response(greeting, action_url),
         media_type="application/xml"
@@ -66,6 +71,22 @@ async def respond_to_caller(request: Request):
     form = await request.form()
     call_sid = form.get("CallSid", "")
     speech_result = form.get("SpeechResult", "")
+    recording_url = form.get("RecordingUrl", "")
+
+    # Use Deepgram if recording available, else fall back to Twilio STT
+    if recording_url and os.getenv("DEEPGRAM_API_KEY"):
+        deepgram_transcript = await transcribe_twilio_recording(
+            recording_url=recording_url,
+            account_sid=os.getenv("TWILIO_ACCOUNT_SID"),
+            auth_token=os.getenv("TWILIO_AUTH_TOKEN")
+        )
+        if deepgram_transcript:
+            speech_result = deepgram_transcript
+            print(f"Deepgram transcript: {speech_result}")
+        else:
+            print(f"Falling back to Twilio STT: {speech_result}")
+    else:
+        print(f"Twilio STT: {speech_result}")
 
     session = conversation_sessions.get(call_sid, {
         "borrower": None,
@@ -101,6 +122,7 @@ async def respond_to_caller(request: Request):
             transcript=str(history),
             outcome=f"PTP Rs {result['ptp_amount']} by {result['ptp_date']}"
         )
+        print(f"PTP captured: Rs {result['ptp_amount']} by {result['ptp_date']}")
 
     if result["escalate"]:
         response = VoiceResponse()
@@ -108,7 +130,7 @@ async def respond_to_caller(request: Request):
         response.hangup()
         return Response(content=str(response), media_type="application/xml")
 
-    action_url = f"{os.getenv('BASE_URL', 'http://localhost:8000')}/voice/respond"
+    action_url = f"{os.getenv('BASE_URL')}/voice/respond"
     return Response(
         content=twiml_response(result["response"], action_url),
         media_type="application/xml"
@@ -133,7 +155,7 @@ async def outbound_call(request: Request):
     else:
         greeting = "Hello, this is CFLO calling regarding your loan account. Please call us back at your earliest convenience."
 
-    action_url = f"{os.getenv('BASE_URL', 'http://localhost:8000')}/voice/respond"
+    action_url = f"{os.getenv('BASE_URL')}/voice/respond"
     return Response(
         content=twiml_response(greeting, action_url),
         media_type="application/xml"
