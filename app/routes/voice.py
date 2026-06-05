@@ -4,7 +4,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
-from twilio.twiml.voice_response import VoiceResponse, Gather, Record
+from twilio.twiml.voice_response import VoiceResponse, Gather
 from data.database import get_borrower_by_phone, log_ptp, log_call
 from app.services.dialogue import get_agent_response, build_greeting
 from app.services.stt import transcribe_twilio_recording
@@ -42,7 +42,16 @@ async def inbound_call(request: Request):
     caller_number = form.get("From", "")
     call_sid = form.get("CallSid", "")
 
-    borrower = get_borrower_by_phone(caller_number)
+    # Try multiple number formats to find borrower
+    borrower = (
+        get_borrower_by_phone(caller_number) or
+        get_borrower_by_phone(caller_number.replace(" ", "")) or
+        get_borrower_by_phone("+" + caller_number.lstrip("+")) or
+        get_borrower_by_phone(caller_number[-10:]) or
+        get_borrower_by_phone("+91" + caller_number[-10:])
+    )
+
+    print(f"Inbound call from: {caller_number} — Borrower found: {borrower is not None}")
 
     if borrower:
         conversation_sessions[call_sid] = {
@@ -59,11 +68,25 @@ async def inbound_call(request: Request):
         }
         greeting = "Hello, thank you for calling CFLO. I am your AI assistant. How can I help you with your loan account today?"
 
-    action_url = f"{os.getenv('BASE_URL')}/voice/respond"
-    return Response(
-        content=twiml_response(greeting, action_url),
-        media_type="application/xml"
+    # RBI compliant consent prompt + greeting
+    response = VoiceResponse()
+    response.say(
+        "This call is from CFLO Financial Services and may be recorded for quality and compliance purposes.",
+        voice="Polly.Aditi",
+        language="en-IN"
     )
+    gather = Gather(
+        input="speech",
+        action=f"{os.getenv('BASE_URL')}/voice/respond",
+        method="POST",
+        timeout=5,
+        speech_timeout="auto",
+        language="en-IN",
+        enhanced=True,
+    )
+    gather.say(greeting, voice="Polly.Aditi", language="en-IN")
+    response.append(gather)
+    return Response(content=str(response), media_type="application/xml")
 
 
 @router.post("/voice/respond")
@@ -143,7 +166,11 @@ async def outbound_call(request: Request):
     call_sid = form.get("CallSid", "")
     to_number = form.get("To", "")
 
-    borrower = get_borrower_by_phone(to_number)
+    borrower = (
+        get_borrower_by_phone(to_number) or
+        get_borrower_by_phone(to_number.replace(" ", "")) or
+        get_borrower_by_phone("+91" + to_number[-10:])
+    )
 
     if borrower:
         conversation_sessions[call_sid] = {
@@ -155,8 +182,22 @@ async def outbound_call(request: Request):
     else:
         greeting = "Hello, this is CFLO calling regarding your loan account. Please call us back at your earliest convenience."
 
-    action_url = f"{os.getenv('BASE_URL')}/voice/respond"
-    return Response(
-        content=twiml_response(greeting, action_url),
-        media_type="application/xml"
+    # RBI compliant consent prompt + greeting
+    response = VoiceResponse()
+    response.say(
+        "This call is from CFLO Financial Services and may be recorded for quality and compliance purposes.",
+        voice="Polly.Aditi",
+        language="en-IN"
     )
+    gather = Gather(
+        input="speech",
+        action=f"{os.getenv('BASE_URL')}/voice/respond",
+        method="POST",
+        timeout=5,
+        speech_timeout="auto",
+        language="en-IN",
+        enhanced=True,
+    )
+    gather.say(greeting, voice="Polly.Aditi", language="en-IN")
+    response.append(gather)
+    return Response(content=str(response), media_type="application/xml")
