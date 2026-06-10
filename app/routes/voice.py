@@ -36,39 +36,39 @@ def twiml_response(text: str, action_url: str, timeout: int = 5) -> str:
     return str(response)
 
 
+def find_borrower(phone: str):
+    return (
+        get_borrower_by_phone(phone) or
+        get_borrower_by_phone(phone.replace(" ", "")) or
+        get_borrower_by_phone("+" + phone.lstrip("+")) or
+        get_borrower_by_phone("+91" + phone[-10:])
+    )
+
+
 @router.post("/voice/inbound")
 async def inbound_call(request: Request):
     form = await request.form()
     caller_number = form.get("From", "")
     call_sid = form.get("CallSid", "")
 
-    # Try multiple number formats to find borrower
-    borrower = (
-        get_borrower_by_phone(caller_number) or
-        get_borrower_by_phone(caller_number.replace(" ", "")) or
-        get_borrower_by_phone("+" + caller_number.lstrip("+")) or
-        get_borrower_by_phone(caller_number[-10:]) or
-        get_borrower_by_phone("+91" + caller_number[-10:])
-    )
-
-    print(f"Inbound call from: {caller_number} — Borrower found: {borrower is not None}")
+    borrower = find_borrower(caller_number)
+    print(f"INBOUND from: {caller_number} — Borrower: {borrower['name'] if borrower else 'Not found'}")
 
     if borrower:
         conversation_sessions[call_sid] = {
             "borrower": borrower,
             "history": [],
-            "intent": "inbound_identified"
+            "call_type": "inbound"
         }
-        greeting = build_greeting(borrower)
+        greeting = build_greeting(borrower, call_type="inbound")
     else:
         conversation_sessions[call_sid] = {
             "borrower": None,
             "history": [],
-            "intent": "inbound_unknown"
+            "call_type": "inbound"
         }
-        greeting = "Hello, thank you for calling CFLO. I am your AI assistant. How can I help you with your loan account today?"
+        greeting = "Thank you for calling CFLO Financial Services. How can I assist you with your loan account today?"
 
-    # RBI compliant consent prompt + greeting
     response = VoiceResponse()
     response.say(
         "This call is from CFLO Financial Services and may be recorded for quality and compliance purposes.",
@@ -96,7 +96,6 @@ async def respond_to_caller(request: Request):
     speech_result = form.get("SpeechResult", "")
     recording_url = form.get("RecordingUrl", "")
 
-    # Use Deepgram if recording available, else fall back to Twilio STT
     if recording_url and os.getenv("DEEPGRAM_API_KEY"):
         deepgram_transcript = await transcribe_twilio_recording(
             recording_url=recording_url,
@@ -105,25 +104,27 @@ async def respond_to_caller(request: Request):
         )
         if deepgram_transcript:
             speech_result = deepgram_transcript
-            print(f"Deepgram transcript: {speech_result}")
+            print(f"Deepgram: {speech_result}")
         else:
-            print(f"Falling back to Twilio STT: {speech_result}")
+            print(f"Twilio STT: {speech_result}")
     else:
         print(f"Twilio STT: {speech_result}")
 
     session = conversation_sessions.get(call_sid, {
         "borrower": None,
         "history": [],
-        "intent": "unknown"
+        "call_type": "outbound"
     })
 
     borrower = session.get("borrower")
     history = session.get("history", [])
+    call_type = session.get("call_type", "outbound")
 
     result = get_agent_response(
         conversation_history=history,
         borrower_info=borrower,
-        user_message=speech_result
+        user_message=speech_result,
+        call_type=call_type
     )
 
     history.append({"role": "user", "content": speech_result})
@@ -140,7 +141,7 @@ async def respond_to_caller(request: Request):
         log_call(
             borrower_id=borrower["id"],
             call_sid=call_sid,
-            direction="inbound",
+            direction=call_type,
             intent="ptp_captured",
             transcript=str(history),
             outcome=f"PTP Rs {result['ptp_amount']} by {result['ptp_date']}"
@@ -166,23 +167,19 @@ async def outbound_call(request: Request):
     call_sid = form.get("CallSid", "")
     to_number = form.get("To", "")
 
-    borrower = (
-        get_borrower_by_phone(to_number) or
-        get_borrower_by_phone(to_number.replace(" ", "")) or
-        get_borrower_by_phone("+91" + to_number[-10:])
-    )
+    borrower = find_borrower(to_number)
+    print(f"OUTBOUND to: {to_number} — Borrower: {borrower['name'] if borrower else 'Not found'}")
 
     if borrower:
         conversation_sessions[call_sid] = {
             "borrower": borrower,
             "history": [],
-            "intent": "outbound_emi_reminder"
+            "call_type": "outbound"
         }
-        greeting = build_greeting(borrower)
+        greeting = build_greeting(borrower, call_type="outbound")
     else:
-        greeting = "Hello, this is CFLO calling regarding your loan account. Please call us back at your earliest convenience."
+        greeting = "Hello, this is CFLO Financial Services calling regarding your loan account. Please call us back at your earliest convenience on our helpline."
 
-    # RBI compliant consent prompt + greeting
     response = VoiceResponse()
     response.say(
         "This call is from CFLO Financial Services and may be recorded for quality and compliance purposes.",
