@@ -15,16 +15,16 @@ router = APIRouter()
 async def dashboard():
     conn = get_connection()
     cursor = conn.cursor()
-    
+
     cursor.execute("SELECT * FROM borrowers ORDER BY dpd DESC")
     borrowers = [dict(row) for row in cursor.fetchall()]
-    
+
     cursor.execute("SELECT * FROM ptp_log ORDER BY captured_at DESC LIMIT 20")
     ptps = [dict(row) for row in cursor.fetchall()]
-    
+
     cursor.execute("SELECT * FROM call_log ORDER BY started_at DESC LIMIT 20")
     calls = [dict(row) for row in cursor.fetchall()]
-    
+
     conn.close()
 
     segment_colors = {
@@ -45,9 +45,21 @@ async def dashboard():
             <td><span style="color:{color};font-weight:600">{b['dpd']} days</span></td>
             <td><span style="background:{color};color:white;padding:2px 8px;border-radius:99px;font-size:12px">{b['risk_segment']}</span></td>
             <td>
-                <button onclick="triggerCall('{b['phone']}')" 
-                style="background:#3b82f6;color:white;border:none;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px">
-                Call
+                <button onclick="triggerCall('{b['id']}')"
+                style="background:#3b82f6;color:white;border:none;padding:4px 8px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px">
+                📞 Call
+                </button>
+                <button onclick="triggerSMS('{b['id']}')"
+                style="background:#6b7280;color:white;border:none;padding:4px 8px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px">
+                💬 SMS
+                </button>
+                <button onclick="triggerWhatsApp('{b['id']}')"
+                style="background:#22c55e;color:white;border:none;padding:4px 8px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px">
+                🟢 WA
+                </button>
+                <button onclick="triggerEmail('{b['id']}')"
+                style="background:#f97316;color:white;border:none;padding:4px 8px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px">
+                📧 Email
                 </button>
             </td>
         </tr>"""
@@ -88,7 +100,6 @@ async def dashboard():
         td {{ padding: 12px 16px; font-size: 13px; border-bottom: 1px solid #f1f5f9; }}
         tr:last-child td {{ border-bottom: none; }}
         tr:hover td {{ background: #f8fafc; }}
-        .badge {{ padding: 2px 8px; border-radius: 99px; font-size: 12px; font-weight: 500; }}
         #status {{ position: fixed; bottom: 24px; right: 24px; background: #1e293b; color: white; padding: 12px 20px; border-radius: 10px; font-size: 13px; display: none; }}
     </style>
 </head>
@@ -120,13 +131,13 @@ async def dashboard():
     <div class="section">
         <div class="section-header">
             <span>Borrower accounts</span>
-            <button onclick="triggerAll()" style="background:#3b82f6;color:white;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px">Call all overdue</button>
+            <button onclick="triggerCampaign()" style="background:#3b82f6;color:white;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px">Run smart campaign</button>
         </div>
         <table>
             <tr>
                 <th>Name</th><th>Loan</th><th>Outstanding</th>
                 <th>EMI</th><th>Due date</th><th>DPD</th>
-                <th>Segment</th><th>Action</th>
+                <th>Segment</th><th>Actions</th>
             </tr>
             {borrower_rows}
         </table>
@@ -143,12 +154,12 @@ async def dashboard():
     <div id="status"></div>
 
     <script>
-        async function triggerCall(phone) {{
+        async function triggerCall(borrowerId) {{
             const status = document.getElementById('status');
             status.style.display = 'block';
-            status.textContent = 'Calling ' + phone + '...';
+            status.textContent = 'Initiating call...';
             try {{
-                const res = await fetch('/call/test?to_number=' + encodeURIComponent(phone), {{method: 'POST'}});
+                const res = await fetch('/call/borrower/' + borrowerId, {{method: 'POST'}});
                 const data = await res.json();
                 status.textContent = 'Call initiated! SID: ' + data.call_sid;
             }} catch(e) {{
@@ -157,11 +168,60 @@ async def dashboard():
             setTimeout(() => status.style.display = 'none', 4000);
         }}
 
-        async function triggerAll() {{
+        async function triggerSMS(borrowerId) {{
             const status = document.getElementById('status');
             status.style.display = 'block';
-            status.textContent = 'Starting campaign...';
-            setTimeout(() => status.style.display = 'none', 3000);
+            status.textContent = 'Sending SMS...';
+            try {{
+                const res = await fetch('/communicate/sms/' + borrowerId, {{method: 'POST'}});
+                const data = await res.json();
+                status.textContent = data.status || data.error;
+            }} catch(e) {{
+                status.textContent = 'Error: ' + e.message;
+            }}
+            setTimeout(() => status.style.display = 'none', 4000);
+        }}
+
+        async function triggerWhatsApp(borrowerId) {{
+            const status = document.getElementById('status');
+            status.style.display = 'block';
+            status.textContent = 'Sending WhatsApp...';
+            try {{
+                const res = await fetch('/communicate/whatsapp/' + borrowerId, {{method: 'POST'}});
+                const data = await res.json();
+                status.textContent = data.status || data.error;
+            }} catch(e) {{
+                status.textContent = 'Error: ' + e.message;
+            }}
+            setTimeout(() => status.style.display = 'none', 4000);
+        }}
+
+        async function triggerCampaign() {{
+            const status = document.getElementById('status');
+            status.style.display = 'block';
+            status.textContent = 'Running smart campaign...';
+            try {{
+                const res = await fetch('/communicate/campaign', {{method: 'POST'}});
+                const data = await res.json();
+                status.textContent = 'Campaign done! ' + data.total + ' borrowers processed.';
+            }} catch(e) {{
+                status.textContent = 'Error: ' + e.message;
+            }}
+            setTimeout(() => status.style.display = 'none', 5000);
+        }}
+
+        async function triggerEmail(borrowerId) {{
+            const status = document.getElementById('status');
+            status.style.display = 'block';
+            status.textContent = 'Sending email...';
+            try {{
+                const res = await fetch('/communicate/email/' + borrowerId, {{method: 'POST'}});
+                const data = await res.json();
+                status.textContent = data.status || data.error;
+            }} catch(e) {{
+                status.textContent = 'Error: ' + e.message;
+            }}
+            setTimeout(() => status.style.display = 'none', 4000);
         }}
     </script>
 </body>

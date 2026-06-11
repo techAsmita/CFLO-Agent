@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routes.voice import router as voice_router
 from app.routes.outbound import router as outbound_router
 from app.routes.dashboard import router as dashboard_router
+from app.routes.communications import router as communications_router
 from data.database import init_db
 from dotenv import load_dotenv
 import uvicorn
@@ -26,6 +27,7 @@ app.add_middleware(
 app.include_router(voice_router)
 app.include_router(outbound_router)
 app.include_router(dashboard_router)
+app.include_router(communications_router)
 
 @app.on_event("startup")
 async def startup():

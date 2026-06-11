@@ -55,7 +55,7 @@ def init_db():
     cursor.execute("SELECT COUNT(*) FROM borrowers")
     if cursor.fetchone()[0] == 0:
         borrowers = [
-            ("B001", "Ravi Sharma",   "+918800662025", "ravi@email.com",   "LOAN-4821", 84000, 8400, "2026-06-05", 12, "S2", "2026-04-20", 4000),
+            ("B001", "Ravi Sharma", "+918800662025", "asmitaasmani@gmail.com", "LOAN-4821", 84000, 8400, "2026-06-05", 12, "S2", "2026-04-20", 4000),
             ("B002", "Priya Mehta",   "+14155550002", "priya@email.com",  "LOAN-7103", 45000, 5200, "2026-06-08",  3, "S4", "2026-05-28", 5200),
             ("B003", "Amit Kumar",    "+14155550003", "amit@email.com",   "LOAN-2299", 12000, 3000, "2026-06-03",  0, "S5", "2026-06-01", 3000),
             ("B004", "Sunita Nair",   "+14155550004", "sunita@email.com", "LOAN-8844", 95000, 9500, "2026-05-25", 45, "S1", "2026-03-10", 2000),
